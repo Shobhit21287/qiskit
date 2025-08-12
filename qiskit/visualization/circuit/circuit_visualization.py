@@ -290,9 +290,26 @@ def circuit_drawer(
 
     cregbundle = check_clbit_in_inst(circuit, cregbundle)
 
-    if output == "text":
+    if output == "text2":
         return CircuitData.draw(circuit)
     
+    elif output == "text":
+        return _text_circuit_drawer(
+            circuit,
+            filename=filename,
+            reverse_bits=reverse_bits,
+            plot_barriers=plot_barriers,
+            justify=justify,
+            vertical_compression=vertical_compression,
+            idle_wires=idle_wires,
+            with_layout=with_layout,
+            fold=fold,
+            initial_state=initial_state,
+            cregbundle=cregbundle,
+            wire_order=complete_wire_order,
+            expr_len=expr_len,
+        )
+
     elif output == "latex":
         image = _latex_circuit_drawer(
             circuit,
