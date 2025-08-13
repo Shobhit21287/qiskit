@@ -291,7 +291,8 @@ def circuit_drawer(
     cregbundle = check_clbit_in_inst(circuit, cregbundle)
 
     if output == "text2":
-        return CircuitData.draw(circuit)
+        from qiskit._accelerate.circuit import CircuitDrawer
+        CircuitDrawer.draw(circuit) 
     
     elif output == "text":
         return _text_circuit_drawer(

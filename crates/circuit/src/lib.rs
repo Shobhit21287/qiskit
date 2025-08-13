@@ -36,6 +36,7 @@ pub mod parameter_table;
 pub mod register_data;
 pub mod slice;
 pub mod util;
+pub mod circuit_drawer;
 
 pub mod rustworkx_core_vnext;
 mod variable_mapper;
@@ -244,6 +245,7 @@ pub fn circuit(m: &Bound<PyModule>) -> PyResult<()> {
     m.add_class::<parameter::parameter_expression::PyParameterVectorElement>()?;
     m.add_class::<parameter::parameter_expression::OpCode>()?;
     m.add_class::<parameter::parameter_expression::OPReplay>()?;
+    m.add_class::<circuit_drawer::CircuitDrawer>()?;
     let classical_mod = PyModule::new(m.py(), "classical")?;
     classical::register_python(&classical_mod)?;
     m.add_submodule(&classical_mod)?;
