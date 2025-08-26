@@ -49,38 +49,19 @@ use crate::circuit_data::CircuitData;
 import_exception!(qiskit.circuit.exceptions, CircuitError);
 
 
-#[pyfunction]    
-#[pyo3(name = "draw")]
-pub fn py_drawer(py: Python, dag_circ: &Bound<PyAny>) -> PyResult<()> {
-    let dag_circ = dag_circ.extract::<DAGCircuit>()?;
-    println!("function is being called from circuit_drawer.rs FILE");
-    circuit_draw(&dag_circ);
+#[pyfunction(name = "draw")]
+pub fn py_drawer(py: Python, quantum_circuit: &Bound<PyAny>) -> PyResult<()> {
+    if !quantum_circuit.is_instance(QUANTUM_CIRCUIT.get_bound(py))? {
+        return Err(PyTypeError::new_err(
+            "Expected a QuantumCircuit instance"
+        ));
+    }
+    println!("FUNCTION IS BEING CALLED FROM circuit_drawer.rs FILE");
+    let circ_data: QuantumCircuitData = quantum_circuit.extract()?;
+    let dag_circuit = circuit_to_dag(circ_data, true, None, None)?;
+    circuit_draw(&dag_circuit);
     Ok(())
 }
-
-#[pymethods]
-impl CircuitDrawer{
-
-    #[staticmethod]
-    #[pyo3(name = "draw")]
-    fn py_drawer(py: Python, quantum_circuit: &Bound<PyAny>) -> PyResult<()> {
-        if !quantum_circuit.is_instance(QUANTUM_CIRCUIT.get_bound(py))? {
-            return Err(PyTypeError::new_err(
-                "Expected a QuantumCircuit instance"
-            ));
-        }
-        println!("FUNCTION IS BEING CALLED FROM circuit_drawer.rs FILE");
-        let circ_data: CircuitData = quantum_circuit.getattr("_data")?.extract()?;
-        circuit_draw(&circ_data);
-        Ok(())
-    }
-}
-
-// pub struct InstructionIndices {
-//     pub instruction: NodeIndex,
-//     pub qubit_indices: (u32,u32),
-
-// }
 
 pub const q_wire: &str = "─";
 pub const c_wire: char = '═';
@@ -364,116 +345,16 @@ impl circuit_rep {
     }
 }
 
-// // print partitions
-        // for (i,layer) in layer_iterator.enumerate() {
-        //     let mut layer_instructions: Vec<&PackedInstruction> = Vec::new();
-        //     println!("Layer: {}",i);
-        //     for node_index in layer {
-        //         if let NodeType::Operation(instruction) = &binding.dag()[node_index] {
-        //             layer_instructions.push(instruction);
-        //             //print instruction qubits and clbits
-        //             let qubits = binding.qargs_interner().get(instruction.qubits);
-        //             let clbits = binding.cargs_interner().get(instruction.clbits);      
-        //             println!("  Instruction: {} Qubits: {:?} Clbits: {:?}", instruction.op.name(), qubits, clbits);
-        //         }
-        //     }
-        // }
 
 pub fn circuit_draw(dag_circ: &DAGCircuit) {
-
-    let dag_circuit = circuit_to_dag(quantum_circuit_data, true, None, None)
-        .expect("Failed to convert circuit data to DAGCircuit");
 
     let mut output = String::new();
 
     // Create a circuit representation
-    let mut circuit_rep = circuit_rep::new(dag_circuit.clone());
+    let mut circuit_rep = circuit_rep::new(dag_circ.clone());
     circuit_rep.set_qubit_name();
     output.push_str(&circuit_rep.circuit_string());
     circuit_rep.build_layers();
     // Print the circuit representation
     println!("{}", output);
-
-    // output.push_str("DAG Circuit Operations:\n");
-    // output.push_str(&format!("Number of qubits: {}\n", dag_circuit.num_qubits()));
-    // output.push_str(&format!("Number of operations: {}\n", dag_circuit.num_ops()));
-    // output.push_str("Operations:\n");
-    
-    // // creating representation where each wire is represented by 3 strings
-    // let mut circuit_rep: Vec<String> = vec![String::new(); (dag_circuit.num_qubits() + 1) * 3];
-
-    // // Fill the first column with qubit labels
-    // for (i, qubit) in dag_circuit.qubits().objects().iter().enumerate() {
-    //     let qubit_index = i * 3 + 1;
-    //     let qubit_name = format!("q_{}: ", i);
-    //     circuit_rep[qubit_index].push_str(&qubit_name);
-    //     circuit_rep[qubit_index - 1].push_str(" ".repeat((&qubit_name).len()).as_str());
-    //     circuit_rep[qubit_index + 1].push_str(" ".repeat((&qubit_name).len()).as_str());
-    // }
-
-    // // Print the circuit representation
-    // for i in circuit_rep {
-    //     println!("{}", i);
-    // }
-    // //getting qubits and clbit information
-    // for (index, qubit) in dag_circuit.qubits().objects().iter().enumerate() {
-    //     println!("Qubit {}: {:?}", index, qubit);
-    // };
-
-    // // Iterate through clbits with their indices  
-    // for (index, clbit) in dag_circuit.clbits().objects().iter().enumerate() {
-    //     println!("Clbit {}: {:?}", index, clbit);
-    // };
-
-    // let layer_iterator = dag_circuit.multigraph_layers();
-    // for (layer_index, layer) in layer_iterator.enumerate() {
-    //     output.push_str(&format!("Layer {}:\n", layer_index));
-    
-    //     // Filter for operation nodes only
-    //     let operations: Vec<_> = layer
-    //         .into_iter()
-    //         .filter_map(|node_index| {
-    //             match &dag_circuit.dag()[node_index] {
-    //                 NodeType::Operation(instruction) => Some((node_index, instruction)),
-    //                 _ => None, // Skip input/output nodes
-    //             }
-    //         })
-    //         .collect();
-    
-    // if operations.is_empty() {
-    //         return;
-    //     }
-
-    // for (node_index, instruction) in operations {
-    //     let standard_gate = StandardGate::try_from(&instruction.op).unwrap();
-    //     let op_name = instruction.op.name();
-    //     let qubits = self.dag_circ.qargs_interner().get(instruction.qubits);
-    //     let clbits = self.dag_circ.cargs_interner().get(instruction.clbits);
-
-    //     let qubit_str = qubits.iter()
-    //         .map(|q| q.0.to_string())
-    //         .collect::<Vec<_>>()
-    //         .join(",");
-        
-    //     let clbit_str = clbits.iter()
-    //         .map(|c| c.0.to_string())
-    //         .collect::<Vec<_>>()
-    //         .join(",");
-    
-    //     // Here, you might want to store or process the operation info as needed.
-    //     // For now, just print or log as a placeholder.
-    //     println!(
-    //         "  Node {}: {} qubits=[{}] clbits=[{}]",
-    //         node_index.index(), op_name, qubit_str, clbit_str
-    //     );
-    
-    //     // Print parameters if any
-    //     let params = instruction.params_view();
-    //     if !params.is_empty() {
-    //         println!("    params: {:?}", params);
-    //     }
-    // }
-
-    // println!("{}",output);
-    // }
 }
