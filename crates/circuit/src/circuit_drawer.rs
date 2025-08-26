@@ -14,7 +14,8 @@ use std::fmt::Debug;
 use std::hash::{Hash, RandomState};
 #[cfg(feature = "cache_pygates")]
 use std::sync::OnceLock;
-
+use std::thread::current;
+use hashbrown::HashSet;
 use crate::bit::{
     BitLocations, ClassicalRegister, PyBit, QuantumRegister, Register, ShareableClbit,
     ShareableQubit,
@@ -57,6 +58,29 @@ pub fn py_drawer(py: Python, dag_circ: &Bound<PyAny>) -> PyResult<()> {
     Ok(())
 }
 
+#[pymethods]
+impl CircuitDrawer{
+
+    #[staticmethod]
+    #[pyo3(name = "draw")]
+    fn py_drawer(py: Python, quantum_circuit: &Bound<PyAny>) -> PyResult<()> {
+        if !quantum_circuit.is_instance(QUANTUM_CIRCUIT.get_bound(py))? {
+            return Err(PyTypeError::new_err(
+                "Expected a QuantumCircuit instance"
+            ));
+        }
+        println!("FUNCTION IS BEING CALLED FROM circuit_drawer.rs FILE");
+        let circ_data: CircuitData = quantum_circuit.getattr("_data")?.extract()?;
+        circuit_draw(&circ_data);
+        Ok(())
+    }
+}
+
+// pub struct InstructionIndices {
+//     pub instruction: NodeIndex,
+//     pub qubit_indices: (u32,u32),
+
+// }
 
 pub const q_wire: &str = "─";
 pub const c_wire: char = '═';
@@ -127,6 +151,7 @@ impl qubit_wire {
     }
 }
 
+
 pub struct circuit_rep {
     q_wires: Vec::<qubit_wire>,
     dag_circ: DAGCircuit
@@ -188,29 +213,176 @@ impl circuit_rep {
     pub fn build_layers(&mut self) {
         let binding = self.dag_circ.clone();
         let layer_iterator = binding.multigraph_layers();
-        for (layer_index, layer) in layer_iterator.enumerate() {
-            //create a vector of packed operations using the vectors of 
 
-            let operations: Vec<&PackedInstruction> = layer
-                .into_iter()
-                .filter_map(|node_index| {
-                    match &binding.dag()[node_index] {
-                        NodeType::Operation(instruction) => Some(instruction),
-                        _ => None, // Skip input/output nodes
+        let mut final_layers:Vec<Vec<NodeIndex>> = Vec::new();
+
+        let total_qubits = binding.num_qubits() as u32;
+        let total_clbits = binding.num_clbits() as u32;
+
+        println!("Building layers for the circuit...");
+
+        for (i,layer) in layer_iterator.enumerate(){ 
+            
+            println!("Processing layer {}", i);
+
+            // NodeIndex is being pushed into each sublayer
+            let mut sublayers: Vec<Vec<NodeIndex>> = vec![Vec::new()];
+            // let mut sublayers: Vec<Vec<NodeIndex>> = vec![Vec::new(); layer.len()];
+
+            
+            for node_index in layer {
+                if let NodeType::Operation(instruction_to_insert) = &binding.dag()[node_index] {
+                    for sublayer in sublayers.iter_mut() {
+                        if sublayer.is_empty() {
+                            sublayer.push(node_index);
+                        } else {
+                            let mut overlap = false;
+                            for &sub_node_index in sublayer.iter() {
+                                if let NodeType::Operation(instruction) = &binding.dag()[sub_node_index]{
+                                    let subnode_qubits = binding.qargs_interner().get(instruction.qubits);
+                                    let subnode_clbits = binding.cargs_interner().get(instruction.clbits);
+                                    let node_qubits = binding.qargs_interner().get(instruction_to_insert.qubits);
+                                    let node_clbits = binding.cargs_interner().get(instruction_to_insert.clbits);
+
+                                    // index can be 0 as well so to unwrap_or with default 0 might not be the best idea
+                                    let subnode_min_qubit = subnode_qubits.iter().map(|q| q.0).min();  
+                                    let subnode_max_qubit = subnode_qubits.iter().map(|q| q.0).max();
+                                    let subnode_min_clbit = subnode_clbits.iter().map(|c| c.0).min();
+                                    let subnode_max_clbit = subnode_clbits.iter().map(|c| c.0).max();
+                                    let node_min_qubit = node_qubits.iter().map(|q| q.0).min();
+                                    let node_max_qubit = node_qubits.iter().map(|q| q.0).max();
+                                    let node_min_clbit = node_clbits.iter().map(|c| c.0).min();
+                                    let node_max_clbit = node_clbits.iter().map(|c| c.0).max();
+
+                                    let node_min = match node_min_qubit {
+                                        Some(val) => val,
+                                        None => match node_max_qubit {
+                                            Some(cval) => cval,
+                                            None =>  match node_min_clbit {
+                                                Some(cval) => cval + total_qubits,
+                                                None => match node_max_clbit {
+                                                    Some(qval) => qval + total_qubits,
+                                                    None => continue, // No qubits or clbits, skip this node
+                                                },                                                
+                                            }, // No qubits or clbits, skip this node
+                                        },
+                                    };
+
+                                    let node_max = match node_max_clbit {
+                                        Some(val) => val + total_qubits,
+                                        None => match node_min_clbit {
+                                            Some(cval) => cval + total_qubits,
+                                            None =>  match node_max_qubit {
+                                                Some(cval) => cval,
+                                                None => match node_min_qubit {
+                                                    Some(qval) => qval,
+                                                    None => continue, // No qubits or clbits, skip this node
+                                                },                                                
+                                            }, // No qubits or clbits, skip this node
+                                        },
+                                    };
+
+                                    let subnode_min = match subnode_min_qubit {
+                                        Some(val) => val,
+                                        None => match subnode_max_qubit {
+                                            Some(cval) => cval,
+                                            None =>  match subnode_min_clbit {
+                                                Some(cval) => cval + total_qubits,
+                                                None => match subnode_max_clbit {
+                                                    Some(qval) => qval + total_qubits,
+                                                    None => continue, // No qubits or clbits, skip this node
+                                                },                                                
+                                            }, // No qubits or clbits, skip this node
+                                        },
+                                    };
+
+                                    let subnode_max = match subnode_max_clbit {
+                                        Some(val) => val + total_qubits,
+                                        None => match subnode_min_clbit {
+                                            Some(cval) => cval + total_qubits,
+                                            None =>  match subnode_max_qubit {
+                                                Some(cval) => cval,
+                                                None => match subnode_min_qubit {
+                                                    Some(qval) => qval,
+                                                    None => continue, // No qubits or clbits, skip this node
+                                                },                                                
+                                            }, // No qubits or clbits, skip this node
+                                        },
+                                    };
+
+                                    if (subnode_min <= node_min && subnode_max >= node_min) || (subnode_min <= node_max && subnode_max >= node_max) {
+                                        overlap = true;
+                                        // println!("Conflict detected between subnode {:?} and node {:?}", sub_node_index, node_index);
+                                        // println!("Subnode qubits: {:?}, Node qubits: {:?}", subnode_qubits, node_qubits);
+                                        // println!("Subnode clbits: {:?}, Node clbits: {:?}", subnode_clbits, node_clbits);
+                                        // println!("Subnode min/max qubits: {:?}, {:?}, Node min/max qubits: {:?}, {:?}", 
+                                        //     subnode_min_qubit, subnode_max_qubit, node_min_qubit, node_max_qubit);
+                                        // println!("Subnode min/max clbits: {:?}, {:?}, Node min/max clbits: {:?}, {:?}", 
+                                        //     subnode_min_clbit, subnode_max_clbit, node_min_clbit, node_max_clbit);
+                                        // break;
+                                    }
+                                }
+                            }
+                            if !overlap {
+                                sublayer.push(node_index);
+                                break;
+                            } else {
+                                // If there is a conflict, create a new sublayer
+                                let new_sublayer = vec![node_index];
+                                sublayers.push(new_sublayer);
+                                break;
+                            }
+                        }
                     }
-                })
-                .collect();
+                    // println!("sublayer analyzed: {:?}, instruction: {:?}", sublayers, instruction_to_insert);
+                }
+            }
 
-            self.build_layer(operations);
-
-            self.fix_len(q_wire);
+            let mut ct = 0;
+            for j in sublayers {
+                if j.is_empty() {
+                    continue;
+                } else {
+                    final_layers.push(j);
+                    ct += 1;
+                }
+            }
+            println!("Layer {} has {} sublayers", i, ct);
         }
+
+        for (i, layer) in final_layers.iter().enumerate() {
+            for nodeind in layer {
+                if let NodeType::Operation(instruction) = &binding.dag()[*nodeind] {
+                    let qubits = binding.qargs_interner().get(instruction.qubits);
+                    let clbits = binding.cargs_interner().get(instruction.clbits);      
+                    println!("Layer {}: Instruction: {} Qubits: {:?} Clbits: {:?}", i, instruction.op.name(), qubits, clbits);
+                }
+            }
+            println!("-----------------------------------");
+        }
+        
     }
 }
 
+// // print partitions
+        // for (i,layer) in layer_iterator.enumerate() {
+        //     let mut layer_instructions: Vec<&PackedInstruction> = Vec::new();
+        //     println!("Layer: {}",i);
+        //     for node_index in layer {
+        //         if let NodeType::Operation(instruction) = &binding.dag()[node_index] {
+        //             layer_instructions.push(instruction);
+        //             //print instruction qubits and clbits
+        //             let qubits = binding.qargs_interner().get(instruction.qubits);
+        //             let clbits = binding.cargs_interner().get(instruction.clbits);      
+        //             println!("  Instruction: {} Qubits: {:?} Clbits: {:?}", instruction.op.name(), qubits, clbits);
+        //         }
+        //     }
+        // }
+
 pub fn circuit_draw(dag_circ: &DAGCircuit) {
 
-    let dag_circuit = dag_circ.clone();
+    let dag_circuit = circuit_to_dag(quantum_circuit_data, true, None, None)
+        .expect("Failed to convert circuit data to DAGCircuit");
 
     let mut output = String::new();
 
