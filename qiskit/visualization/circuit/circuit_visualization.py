@@ -37,6 +37,7 @@ from warnings import warn
 from qiskit import user_config
 from qiskit.circuit import ControlFlowOp, Measure
 from qiskit.utils import optionals as _optionals
+from qiskit._accelerate.circuit import CircuitData
 
 from ..exceptions import VisualizationError
 from ..utils import _trim as trim_image
@@ -289,7 +290,11 @@ def circuit_drawer(
 
     cregbundle = check_clbit_in_inst(circuit, cregbundle)
 
-    if output == "text":
+    if output == "text2":
+        from qiskit._accelerate.circuit import draw
+        draw(circuit) 
+    
+    elif output == "text":
         return _text_circuit_drawer(
             circuit,
             filename=filename,
@@ -305,6 +310,7 @@ def circuit_drawer(
             wire_order=complete_wire_order,
             expr_len=expr_len,
         )
+
     elif output == "latex":
         image = _latex_circuit_drawer(
             circuit,
