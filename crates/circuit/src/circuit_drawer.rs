@@ -12,8 +12,9 @@
 
 use core::panic;
 use std::fmt::Debug;
-use hashbrown::{HashSet, HashMap};
-use crate::dag_circuit::DAGCircuit;
+use hashbrown::HashSet;
+use crate::bit::{ShareableClbit, ShareableQubit};
+use crate::dag_circuit::{DAGCircuit};
 use crate::operations::{Operation, OperationRef, StandardGate, StandardInstruction};
 use crate::packed_instruction::PackedInstruction;
 use itertools::{Itertools, MinMaxResult};
@@ -1061,15 +1062,31 @@ pub fn get_indices(dag_circ: &DAGCircuit) -> u32{
 }
 
 
+#[derive(Clone)]
+enum WireInput<'a> {
+    Qubit(&'a ShareableQubit),
+    Clbit(&'a ShareableClbit),
+}
+
+impl<'a> Debug for WireInput<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            WireInput::Qubit(&ref qubit) => "Qubit",
+            WireInput::Clbit(&ref clbit) => "Clbit",
+        };
+
+        write!(f, "{}", name)
+    }
+}
 
 /// Enum for  representing the elements stored in a visualization matrix. The elements
 /// do not directly implement visualization capabilities, but rather carry enough information
 /// to enable visualization later on by the actual drawer.
 #[derive(Default, Clone, Debug)]
-enum VisualizationElement2 {
+enum VisualizationElement2<'a> {
     #[default]
     Empty, // Marker for no element
-    Input, // TODO: should be enum for qubit/clbits
+    Input(WireInput<'a>),
     Control, // TODO: should be an enum for the control symbols, e.g. closed, open
     VerticalLine, // TODO: should be an enum for the various types, e.g. single, double
     Operation, // TODO: should be an enum for the various fine-grained types: standard gates, instruction, etc..
@@ -1077,11 +1094,15 @@ enum VisualizationElement2 {
 
 /// A representation of a single column (called here a layer) of a visualization matrix
 #[derive(Clone, Debug)]
-struct VisualizationLayer2(Vec<VisualizationElement2>);
+struct VisualizationLayer2<'a>(Vec<VisualizationElement2<'a>>);
 
-impl VisualizationLayer2 {
+impl<'a> VisualizationLayer2<'a> {
     fn len(&self) -> usize {
         self.0.len()
+    }
+
+    fn add_input(&mut self, input: WireInput<'a>, idx: usize) {
+        self.0[idx] = VisualizationElement2::Input(input);
     }
 
     /// Adds the required visualization elements to represent the given instruction
@@ -1109,8 +1130,8 @@ impl VisualizationLayer2 {
     }
 }
 
-impl Index<usize> for VisualizationLayer2 {
-    type Output = VisualizationElement2;
+impl<'a> Index<usize> for VisualizationLayer2<'a> {
+    type Output = VisualizationElement2<'a>;
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.0[index]
@@ -1123,21 +1144,31 @@ impl Index<usize> for VisualizationLayer2 {
 /// layer(column) represents the qubits and clbits inputs in the circuits, and
 /// M is the number of operation layers.
 #[derive(Debug)]
-struct VisualizationMatrix2 {
-    layers: Vec<VisualizationLayer2>,
+struct VisualizationMatrix2<'a> {
+    layers: Vec<VisualizationLayer2<'a>>,
 }
 
 
-impl VisualizationMatrix2 {
-    fn from_circuit(circuit: &CircuitData) -> PyResult<Self> {
+impl<'a> VisualizationMatrix2<'a> {
+    fn from_circuit(circuit: &'a CircuitData) -> PyResult<Self> {
         let dag = DAGCircuit::from_circuit_data(circuit, false, None, None, None, None)?;
         let inst_layers = build_layers(&dag);
 
         let num_wires = circuit.num_qubits() + circuit.num_clbits();
         let mut layers = vec![VisualizationLayer2(vec![VisualizationElement2::default(); num_wires]); inst_layers.len() + 1]; // Add 1 to account for the inputs layer
 
-        // TODO: add the qubit/clbit inputs here to layer #0
 
+        let input_layer = layers.first_mut().unwrap();
+        let mut input_idx = 0;
+        for qubit in circuit.qubits().objects() {
+            input_layer.add_input(WireInput::Qubit(qubit), input_idx);
+            input_idx += 1;
+        }
+
+        for clbit in circuit.clbits().objects() {
+            input_layer.add_input(WireInput::Clbit(clbit), input_idx);
+            input_idx += 1;
+        }
 
         for (i, layer) in inst_layers.iter().enumerate() {
             for inst in layer {
@@ -1159,8 +1190,8 @@ impl VisualizationMatrix2 {
     }
 }
 
-impl Index<usize> for VisualizationMatrix2 {
-    type Output = VisualizationLayer2;
+impl<'a> Index<usize> for VisualizationMatrix2<'a> {
+    type Output = VisualizationLayer2<'a>;
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.layers[index]
@@ -1183,8 +1214,16 @@ pub fn draw_circuit(circuit: &CircuitData) -> PyResult<()> {
     }
     // circuit_rep2.set_qubit_name();
     // let vis_mat:VisualizationMatrix = VisualizationMatrix::new(&circuit_rep, packedinst_layers);
-
     println!("======================");
+    // Print circuit inputs
+    for i in 0..vis_mat2.num_wires() {
+        if let VisualizationElement2::Input(wire_input) = &vis_mat2[0][i] {
+            match wire_input {
+                WireInput::Qubit(qubit) => println!("QUBIT: {:?}", qubit),
+                WireInput::Clbit(clbit) => println!("CLBIT: {:?}", clbit),
+            }
+        }
+    }
 
     // //using circuit rep to draw circuit
     // let mut circuit_rep = CircuitRep::new(dag.clone());
