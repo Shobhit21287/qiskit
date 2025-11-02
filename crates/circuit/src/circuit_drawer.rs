@@ -264,9 +264,12 @@ impl<'a> VisualizationLayer<'a> {
     /// Adds the required visualization elements to represent the given instruction
     fn add_instruction(&mut self, inst: &'a PackedInstruction, circuit: &CircuitData) {
         match inst.op.view() {
-            OperationRef::StandardGate(gate) => {self.add_standard_gate(gate, inst, circuit);},
+            OperationRef::StandardGate(gate) => {
+                self.add_standard_gate(gate, inst, circuit);
+            }
             OperationRef::StandardInstruction(std_inst) => {
-                self.add_standard_instruction(std_inst, inst, circuit);},            
+                self.add_standard_instruction(std_inst, inst, circuit);
+            }
             _ => unimplemented!(
                 "{}",
                 format!(
@@ -362,7 +365,14 @@ impl<'a> VisualizationLayer<'a> {
                 self.0[qargs.last().unwrap().index()] =
                     VisualizationElement::Boxed(Boxed::Single(inst));
                 if gate.num_ctrl_qubits() > 0 {
-                    self.add_controls(&qargs.iter().take(qargs.len() - 1).map(|q| q.index()).collect(), (minima, maxima));
+                    self.add_controls(
+                        &qargs
+                            .iter()
+                            .take(qargs.len() - 1)
+                            .map(|q| q.index())
+                            .collect(),
+                        (minima, maxima),
+                    );
                 }
             }
             _ => unimplemented!("{}", format!("{:?} is not supported yet", gate)),
