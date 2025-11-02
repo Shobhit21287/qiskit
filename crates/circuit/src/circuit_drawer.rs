@@ -35,8 +35,9 @@ import_exception!(qiskit.circuit.exceptions, CircuitError);
 // int: n 
 
 #[pyfunction(name = "draw")]
-pub fn py_drawer(circuit: QuantumCircuitData) -> PyResult<()> {
-    draw_circuit(&circuit.data)?;
+#[pyo3(signature = (circuit, cregbundle=true))]
+pub fn py_drawer(circuit: QuantumCircuitData, cregbundle: bool) -> PyResult<()> {
+    draw_circuit(&circuit.data, &cregbundle)?;
     Ok(())
 }
 
@@ -921,7 +922,7 @@ impl TextDrawer{
         instruction_label
     }
 
-    fn from_visualization_matrix<'a>(vis_mat: &'a VisualizationMatrix) -> Self{
+    fn from_visualization_matrix<'a>(vis_mat: &'a VisualizationMatrix, cregbundle: &bool) -> Self{
         let mut wires: Vec<Vec<ElementWire>> = vec![];
         for _ in 0..vis_mat.num_wires(){
             wires.push(vec![]);
@@ -930,8 +931,6 @@ impl TextDrawer{
         let mut text_drawer = TextDrawer{
             wires
         };
-
-        let cregbundle = true;
 
         let post_processed_vis_mat = {
             if !cregbundle {
@@ -1442,7 +1441,7 @@ impl TextDrawer{
     //     // self.wires[ind].bot.push_str(&format!("{}{}",&wire.bot,"$"));
     // }
 
-pub fn draw_circuit(circuit: &CircuitData) -> PyResult<()> {
+pub fn draw_circuit(circuit: &CircuitData, cregbundle: &bool) -> PyResult<()> {
     let dag = DAGCircuit::from_circuit_data(circuit, false, None, None, None, None)?;
 
     let vis_mat2 = VisualizationMatrix::from_circuit(&dag,circuit)?;
@@ -1458,7 +1457,7 @@ pub fn draw_circuit(circuit: &CircuitData) -> PyResult<()> {
         println!("");
     }
 
-    let circuit_rep = TextDrawer::from_visualization_matrix(&vis_mat2);
+    let circuit_rep = TextDrawer::from_visualization_matrix(&vis_mat2, cregbundle);
     circuit_rep.print();
     Ok(())
 }
