@@ -37,7 +37,6 @@ from warnings import warn
 from qiskit import user_config
 from qiskit.circuit import ControlFlowOp, Measure
 from qiskit.utils import optionals as _optionals
-from qiskit._accelerate.circuit import CircuitData
 
 from ..exceptions import VisualizationError
 from ..utils import _trim as trim_image
@@ -75,6 +74,7 @@ def circuit_drawer(
     cregbundle: bool | None = None,
     wire_order: list[int] | None = None,
     expr_len: int = 30,
+    measure_arrows: bool | None = None,
 ):
     r"""Draw the quantum circuit. Use the output parameter to choose the drawing format:
 
@@ -172,6 +172,11 @@ def circuit_drawer(
         expr_len: The number of characters to display if an :class:`~.expr.Expr`
             is used for the condition in a :class:`.ControlFlowOp`. If this number is exceeded,
             the string will be truncated at that number and '...' added to the end.
+        measure_arrows: If True, draw an arrow from each measure box down the the classical bit
+            or register where the measure value is placed. If False, do not draw arrow, but
+            instead place the name of the bit or register in the measure box.
+            Default is ``True`` unless the user config file (usually ``~/.qiskit/settings.conf``)
+            has an alternative value set. For example, ``circuit_measure_arrows = False``.
 
     Returns:
         :class:`.TextDrawing` or :class:`matplotlib.figure` or :class:`PIL.Image` or
@@ -209,6 +214,7 @@ def circuit_drawer(
     default_output = "text"
     default_reverse_bits = False
     default_idle_wires = config.get("circuit_idle_wires", "auto")
+    default_measure_arrows = config.get("circuit_measure_arrows", True)
     if config:
         default_output = config.get("circuit_drawer", "text")
         if default_output == "auto":
@@ -231,6 +237,9 @@ def circuit_drawer(
             idle_wires = hasattr(circuit, "_layout") and circuit._layout is None
         else:
             raise VisualizationError(f"Parameter idle_wires={idle_wires} unrecognized.")
+
+    if measure_arrows is None:
+        measure_arrows = default_measure_arrows
 
     if wire_order is not None and reverse_bits:
         raise VisualizationError(
@@ -290,11 +299,7 @@ def circuit_drawer(
 
     cregbundle = check_clbit_in_inst(circuit, cregbundle)
 
-    if output == "text2":
-        from qiskit._accelerate.circuit import draw
-        draw(circuit) 
-    
-    elif output == "text":
+    if output == "text":
         return _text_circuit_drawer(
             circuit,
             filename=filename,
@@ -309,8 +314,8 @@ def circuit_drawer(
             cregbundle=cregbundle,
             wire_order=complete_wire_order,
             expr_len=expr_len,
+            measure_arrows=measure_arrows,
         )
-
     elif output == "latex":
         image = _latex_circuit_drawer(
             circuit,
@@ -358,6 +363,7 @@ def circuit_drawer(
             cregbundle=cregbundle,
             wire_order=complete_wire_order,
             expr_len=expr_len,
+            measure_arrows=measure_arrows,
         )
     else:
         raise VisualizationError(
@@ -389,6 +395,7 @@ def _text_circuit_drawer(
     encoding=None,
     wire_order=None,
     expr_len=30,
+    measure_arrows=True,
 ):
     """Draws a circuit using ascii art.
 
@@ -421,6 +428,9 @@ def _text_circuit_drawer(
         expr_len (int): Optional. The number of characters to display if an :class:`~.expr.Expr`
             is used for the condition in a :class:`.ControlFlowOp`. If this number is exceeded,
             the string will be truncated at that number and '...' added to the end.
+        measure_arrows: If True, draw an arrow from each measure box down the the classical bit
+            or register where the measure value is placed. If False, do not draw arrow, but
+            instead place the name of the bit or register in the measure box.
 
     Returns:
         TextDrawing: An instance that, when printed, draws the circuit in ascii art.
@@ -434,6 +444,7 @@ def _text_circuit_drawer(
         justify=justify,
         idle_wires=idle_wires,
         wire_order=wire_order,
+        measure_arrows=measure_arrows,
     )
     text_drawing = _text.TextDrawing(
         qubits,
@@ -446,6 +457,7 @@ def _text_circuit_drawer(
         encoding=encoding,
         with_layout=with_layout,
         expr_len=expr_len,
+        measure_arrows=measure_arrows,
     )
     text_drawing.plotbarriers = plot_barriers
     text_drawing.line_length = fold
@@ -672,6 +684,7 @@ def _matplotlib_circuit_drawer(
     cregbundle=None,
     wire_order=None,
     expr_len=30,
+    measure_arrows=None,
 ):
     """Draw a quantum circuit based on matplotlib.
     If `%matplotlib inline` is invoked in a Jupyter notebook, it visualizes a circuit inline.
@@ -706,6 +719,9 @@ def _matplotlib_circuit_drawer(
         expr_len (int): Optional. The number of characters to display if an :class:`~.expr.Expr`
             is used for the condition in a :class:`.ControlFlowOp`. If this number is exceeded,
             the string will be truncated at that number and '...' added to the end.
+        measure_arrows: If True, draw an arrow from each measure box down the the classical bit
+            or register where the measure value is placed. If False, do not draw arrow, but
+            instead place the name of the bit or register in the measure box.
 
     Returns:
         matplotlib.figure: a matplotlib figure object for the circuit diagram
@@ -718,6 +734,7 @@ def _matplotlib_circuit_drawer(
         justify=justify,
         idle_wires=idle_wires,
         wire_order=wire_order,
+        measure_arrows=measure_arrows,
     )
     if fold is None:
         fold = 25
@@ -737,5 +754,6 @@ def _matplotlib_circuit_drawer(
         cregbundle=cregbundle,
         with_layout=with_layout,
         expr_len=expr_len,
+        measure_arrows=measure_arrows,
     )
     return qcd.draw(filename)
