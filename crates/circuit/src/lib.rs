@@ -16,6 +16,7 @@ pub mod annotation;
 pub mod bit;
 pub mod bit_locator;
 pub mod circuit_data;
+pub mod circuit_drawer;
 pub mod circuit_instruction;
 pub mod classical;
 pub mod converters;
@@ -36,7 +37,6 @@ pub mod parameter_table;
 pub mod register_data;
 pub mod slice;
 pub mod util;
-pub mod circuit_drawer;
 
 pub mod rustworkx_core_vnext;
 mod variable_mapper;
