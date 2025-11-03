@@ -35,16 +35,17 @@ import_exception!(qiskit.circuit.exceptions, CircuitError);
 
 // TODO: remove when dev is done, since this is only for manual testing
 #[pyfunction(name = "draw")]
-pub fn py_drawer(circuit: QuantumCircuitData) -> PyResult<()> {
-    draw_circuit(&circuit.data)?;
+#[pyo3(signature = (circuit, cregbundle=true, mergewires=true))]
+pub fn py_drawer(circuit: QuantumCircuitData, cregbundle: bool, mergewires: bool) -> PyResult<()> {
+    draw_circuit(&circuit.data, cregbundle, mergewires)?;
     Ok(())
 }
 
-pub fn draw_circuit(circuit: &CircuitData) -> PyResult<()> {
+pub fn draw_circuit(circuit: &CircuitData, cregbundle: bool, mergewires: bool) -> PyResult<()> {
     let vis_mat = VisualizationMatrix::from_circuit(circuit)?;
 
-    let circuit_rep = TextDrawer::from_visualization_matrix(&vis_mat, true);
-    circuit_rep.print(true);
+    let circuit_rep = TextDrawer::from_visualization_matrix(&vis_mat, cregbundle);
+    circuit_rep.print(mergewires);
     Ok(())
 }
 
