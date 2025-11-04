@@ -832,7 +832,7 @@ impl TextDrawer {
                         }
                         StandardGate::RCCX => {
                             // Relative-phase Toffoli gate
-                            Some(format!(" RX({}) ", instruction_param))
+                            Some(format!(" RCCX({}) ", instruction_param))
                         }
                         StandardGate::C3X => {
                             // 3-controlled X gate (4-qubit controlled X)
@@ -844,7 +844,7 @@ impl TextDrawer {
                         }
                         StandardGate::RC3X => {
                             // Relative-phase 3-controlled X gate
-                            Some(format!(" RX({}) ", instruction_param))
+                            Some(format!(" RC3X({}) ", instruction_param))
                         }
                     }
                 } else if let Some(std_instruction) = instruction.op.try_standard_instruction() {
