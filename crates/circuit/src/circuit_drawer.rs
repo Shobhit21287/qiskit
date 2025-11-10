@@ -10,17 +10,16 @@
 // copyright notice, and modified files need to carry a notice indicating
 // that they have been altered from the originals.
 
-use crate::bit::{ShareableClbit, ShareableQubit};
+use crate::bit::{ClassicalRegister, ShareableClbit, ShareableQubit};
 use crate::dag_circuit::DAGCircuit;
 use crate::operations::{Operation, OperationRef, Param, StandardGate, StandardInstruction};
 use crate::packed_instruction::PackedInstruction;
 use crate::{Clbit, Qubit};
-use core::{num, panic};
+use core::panic;
 use hashbrown::{HashMap, HashSet};
 use itertools::{Itertools, MinMaxResult};
 use rustworkx_core::petgraph::csr::IndexType;
 use rustworkx_core::petgraph::stable_graph::NodeIndex;
-use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::ops::Index;
 
@@ -52,12 +51,10 @@ pub fn draw_circuit(
     mergewires: bool,
     fold: Option<usize>,
 ) -> PyResult<()> {
-    let vis_mat = VisualizationMatrix::from_circuit(circuit)?;
+    let vis_mat = VisualizationMatrix::from_circuit(circuit, cregbundle)?;
 
     let circuit_rep = TextDrawer::from_visualization_matrix(&vis_mat, cregbundle);
-    // for i in 0..circuit_rep.wires.len() {
-    //     println!("{:?}", circuit_rep.wires[i]);
-    // }
+
     circuit_rep.print(mergewires, fold);
 
     Ok(())
@@ -124,30 +121,32 @@ fn get_instruction_range(
 enum ElementWireInput<'a> {
     Qubit(&'a ShareableQubit),
     Clbit(&'a ShareableClbit),
+    Creg(&'a ClassicalRegister), // To be used when bundling cregs
 }
 
-impl PartialOrd for ElementWireInput<'_> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
+// impl PartialOrd for ElementWireInput<'_> {
+//     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+//         Some(self.cmp(other))
+//     }
+// }
 
-impl Ord for ElementWireInput<'_> {
-    fn cmp(&self, other: &Self) -> Ordering {
-        match (self, other) {
-            (ElementWireInput::Qubit(_), ElementWireInput::Qubit(_)) => Ordering::Equal,
-            (ElementWireInput::Clbit(_), ElementWireInput::Clbit(_)) => Ordering::Equal,
-            (ElementWireInput::Qubit(_), ElementWireInput::Clbit(_)) => Ordering::Less,
-            (ElementWireInput::Clbit(_), ElementWireInput::Qubit(_)) => Ordering::Greater,
-        }
-    }
-}
+// impl Ord for ElementWireInput<'_> {
+//     fn cmp(&self, other: &Self) -> Ordering {
+//         match (self, other) {
+//             (ElementWireInput::Qubit(_), ElementWireInput::Qubit(_)) => Ordering::Equal,
+//             (ElementWireInput::Clbit(_), ElementWireInput::Clbit(_)) => Ordering::Equal,
+//             (ElementWireInput::Qubit(_), ElementWireInput::Clbit(_)) => Ordering::Less,
+//             (ElementWireInput::Clbit(_), ElementWireInput::Qubit(_)) => Ordering::Greater,
+//         }
+//     }
+// }
 
 impl<'a> Debug for ElementWireInput<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let name = match self {
             ElementWireInput::Qubit(_) => "Qubit",
             ElementWireInput::Clbit(_) => "Clbit",
+            ElementWireInput::Creg(_) => "Creg",
         };
 
         write!(f, "{}", name)
@@ -234,7 +233,7 @@ impl<'a> Debug for Boxed<'a> {
 /// do not directly implement visualization capabilities, but rather carry enough information
 /// to enable visualization later on by the actual drawer.
 
-#[derive(Default, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Default, Clone, Debug)]
 enum VisualizationElement<'a> {
     #[default]
     Empty, // Marker for no element
@@ -259,17 +258,6 @@ impl<'a> Index<usize> for VisualizationLayer<'a> {
 impl<'a> VisualizationLayer<'a> {
     fn len(&self) -> usize {
         self.0.len()
-    }
-
-    fn push(&mut self, element: VisualizationElement<'a>) {
-        self.0.push(element);
-    }
-
-    fn drain(
-        &mut self,
-        range: std::ops::Range<usize>,
-    ) -> impl Iterator<Item = VisualizationElement<'a>> + '_ {
-        self.0.drain(range)
     }
 
     fn add_input(&mut self, input: ElementWireInput<'a>, idx: usize) {
@@ -506,7 +494,7 @@ struct VisualizationMatrix<'a> {
 }
 
 impl<'a> VisualizationMatrix<'a> {
-    fn from_circuit(circuit: &'a CircuitData) -> PyResult<Self> {
+    fn from_circuit(circuit: &'a CircuitData, bundle_cregs: bool) -> PyResult<Self> {
         let dag = DAGCircuit::from_circuit_data(circuit, false, None, None, None, None)?;
 
         let mut node_index_to_inst: HashMap<NodeIndex, &PackedInstruction> =
@@ -517,7 +505,13 @@ impl<'a> VisualizationMatrix<'a> {
 
         let inst_layers = build_layers(&dag);
 
-        let num_wires = circuit.num_qubits() + circuit.num_clbits();
+        let num_wires = circuit.num_qubits()
+            + if bundle_cregs {
+                circuit.cregs_data().len()
+            } else {
+                circuit.num_clbits()
+            };
+
         let mut layers = vec![
             VisualizationLayer(vec![VisualizationElement::default(); num_wires]);
             inst_layers.len() + 1
@@ -530,9 +524,16 @@ impl<'a> VisualizationMatrix<'a> {
             input_idx += 1;
         }
 
-        for clbit in circuit.clbits().objects() {
-            input_layer.add_input(ElementWireInput::Clbit(clbit), input_idx);
-            input_idx += 1;
+        if bundle_cregs {
+            for creg in circuit.cregs() {
+                input_layer.add_input(ElementWireInput::Creg(creg), input_idx);
+                input_idx += 1;
+            }
+        } else {
+            for clbit in circuit.clbits().objects() {
+                input_layer.add_input(ElementWireInput::Clbit(clbit), input_idx);
+                input_idx += 1;
+            }
         }
 
         for (i, layer) in inst_layers.iter().enumerate() {
@@ -962,63 +963,19 @@ impl TextDrawer {
         instruction_label
     }
 
-    fn from_visualization_matrix<'a>(vis_mat: &'a VisualizationMatrix, cregbundle: bool) -> Self {
-        let mut wires: Vec<Vec<ElementWire>> = vec![];
-        let num_wires = {
-            if cregbundle {
-                vis_mat.circuit.num_qubits() + 1
-            } else {
-                vis_mat.num_wires()
-            }
+    fn from_visualization_matrix(vis_mat: &VisualizationMatrix, cregbundle: bool) -> Self {
+        let mut text_drawer = TextDrawer {
+            wires: vec![Vec::new(); vis_mat.num_wires()],
         };
-        for _ in 0..num_wires {
-            wires.push(vec![]);
-        }
-
-        let mut text_drawer = TextDrawer { wires };
-
-        let post_processed_vis_mat = {
-            if !cregbundle {
-                None
-            } else {
-                let classical_bits_range = (
-                    vis_mat.circuit.num_qubits(),
-                    vis_mat.circuit.num_qubits() + vis_mat.circuit.num_clbits(),
-                );
-                let mut temp_vis_mat: VisualizationMatrix<'a> = vis_mat.clone();
-                // compare the last classical elements and replace with max in the vector
-                for layer in temp_vis_mat.layers.iter_mut() {
-                    if let Some(max_element) = layer
-                        .drain(classical_bits_range.0..classical_bits_range.1)
-                        .max()
-                    {
-                        layer.push(max_element.clone());
-                    } else {
-                        layer.push(VisualizationElement::default());
-                    }
-                }
-                Some(temp_vis_mat)
-            }
-        }
-        .unwrap_or(vis_mat.clone());
 
         let mut ct = 0;
-        for layer in &post_processed_vis_mat.layers {
-            let layer_wires = Self::draw_layer(layer, vis_mat, ct, &cregbundle);
+        for layer in &vis_mat.layers {
+            let layer_wires = Self::draw_layer(&layer, vis_mat, ct, &cregbundle);
             ct += 1;
             for (i, wire) in layer_wires.iter().enumerate() {
                 text_drawer.wires[i].push(wire.clone());
             }
         }
-
-        // // print final visualization matrix
-        // for i in 0..post_processed_vis_mat.num_wires() {
-        //     for j in 0..post_processed_vis_mat.layers.len() {
-        //         print!("{:?}", post_processed_vis_mat[j][i]);
-        //     }
-        //     println!();
-        // }
-
         text_drawer
     }
 
@@ -1080,23 +1037,23 @@ impl TextDrawer {
                 // implement for cases where the box is on classical wires. The left and right connectors will change
                 // from single wired to double wired.
 
-                let top_cases: Vec<VisualizationElement> = vec![
-                    VisualizationElement::DirectOnWire(OnWire::Control(ElementOnWire::Top)),
-                    VisualizationElement::DirectOnWire(OnWire::Swap(ElementOnWire::Top)),
-                    VisualizationElement::DirectOnWire(OnWire::Swap(ElementOnWire::Mid)),
-                    VisualizationElement::DirectOnWire(OnWire::Swap(ElementOnWire::Mid)),
-                    VisualizationElement::VerticalLine(InputType::Qubit(None)),
-                    VisualizationElement::VerticalLine(InputType::Clbit(None)),
-                ];
+                let is_top_case = |ve: &VisualizationElement| match ve {
+                    VisualizationElement::DirectOnWire(OnWire::Control(ElementOnWire::Top))
+                    | VisualizationElement::DirectOnWire(OnWire::Swap(ElementOnWire::Top))
+                    | VisualizationElement::DirectOnWire(OnWire::Swap(ElementOnWire::Mid))
+                    | VisualizationElement::VerticalLine(InputType::Qubit(None))
+                    | VisualizationElement::VerticalLine(InputType::Clbit(None)) => true,
+                    _ => false,
+                };
 
-                let bot_cases: Vec<VisualizationElement> = vec![
-                    VisualizationElement::DirectOnWire(OnWire::Control(ElementOnWire::Bot)),
-                    VisualizationElement::DirectOnWire(OnWire::Swap(ElementOnWire::Bot)),
-                    VisualizationElement::DirectOnWire(OnWire::Swap(ElementOnWire::Mid)),
-                    VisualizationElement::DirectOnWire(OnWire::Swap(ElementOnWire::Mid)),
-                    VisualizationElement::VerticalLine(InputType::Qubit(None)),
-                    VisualizationElement::VerticalLine(InputType::Clbit(None)),
-                ];
+                let is_bot_case = |ve: &VisualizationElement| match ve {
+                    VisualizationElement::DirectOnWire(OnWire::Control(ElementOnWire::Bot))
+                    | VisualizationElement::DirectOnWire(OnWire::Swap(ElementOnWire::Bot))
+                    | VisualizationElement::DirectOnWire(OnWire::Swap(ElementOnWire::Mid))
+                    | VisualizationElement::VerticalLine(InputType::Qubit(None))
+                    | VisualizationElement::VerticalLine(InputType::Clbit(None)) => true,
+                    _ => false,
+                };
 
                 // if subtype is measurement then classical connectors
                 let is_measure = match &sub_type {
@@ -1116,7 +1073,7 @@ impl TextDrawer {
 
                 let top_con = {
                     if ind >= 1 {
-                        if top_cases.contains(&vis_layer.0[ind - 1]) {
+                        if is_top_case(&vis_layer.0[ind - 1]) {
                             if is_measure { C_WIRE_CON_TOP } else { TOP_CON }
                         } else {
                             Q_WIRE
@@ -1128,7 +1085,7 @@ impl TextDrawer {
 
                 let bot_con = {
                     if ind + 1 < vis_layer.0.len() {
-                        if bot_cases.contains(&vis_layer.0[ind + 1]) {
+                        if is_bot_case(&vis_layer.0[ind + 1]) {
                             if is_measure { C_BOT_CON } else { BOT_CON }
                         } else {
                             Q_WIRE
@@ -1362,12 +1319,12 @@ impl TextDrawer {
                 ElementWireInput::Qubit(qubit) => {
                     let qubit_name = if let Some(bit_info) = circuit.qubit_indices().get(qubit) {
                         if let Some((register, index)) = bit_info.registers().first() {
-                            format!("{}_{}:", register.name(), index)
+                            format!("{}_{}: ", register.name(), index)
                         } else {
-                            format!("q_{}:", ind)
+                            format!("q_{}: ", ind)
                         }
                     } else {
-                        format!("q_{}:", ind)
+                        format!("q_{}: ", ind)
                     };
                     ElementWire {
                         top: format!("{}", " ".repeat(qubit_name.len())),
@@ -1378,29 +1335,26 @@ impl TextDrawer {
                 ElementWireInput::Clbit(clbit) => {
                     let clbit_name = if let Some(bit_info) = circuit.clbit_indices().get(clbit) {
                         if let Some((register, index)) = bit_info.registers().first() {
-                            if *cregbundle {
-                                format!("{} {}/:", register.name(), circuit.num_clbits())
-                            } else {
-                                format!("{}_{}:", register.name(), index)
-                            }
+                            format!("{}_{}: ", register.name(), index)
                         } else {
-                            if *cregbundle {
-                                format!("c {}/:", circuit.num_clbits())
-                            } else {
-                                format!("c_{}:", ind)
-                            }
+                            format!("c_{}: ", ind)
                         }
                     } else {
-                        if *cregbundle {
-                            format!("c {}/:", circuit.num_clbits())
-                        } else {
-                            format!("c_{}:", ind)
-                        }
+                        format!("c_{}: ", ind)
                     };
                     ElementWire {
                         top: format!("{}", " ".repeat(clbit_name.len())),
                         mid: format!("{}", clbit_name),
                         bot: format!("{}", " ".repeat(clbit_name.len())),
+                    }
+                }
+                ElementWireInput::Creg(creg) => {
+                    let wire_name = format!("{}: {}/", creg.name(), creg.len());
+                    
+                    ElementWire {
+                        top: format!("{}", " ".repeat(wire_name.len())),
+                        mid: format!("{}", wire_name),
+                        bot: format!("{}", " ".repeat(wire_name.len())),
                     }
                 }
             },
