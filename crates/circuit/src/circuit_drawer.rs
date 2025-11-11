@@ -40,9 +40,8 @@ pub fn py_drawer(
     cregbundle: bool,
     mergewires: bool,
     fold: Option<usize>,
-) -> PyResult<()> {
-    draw_circuit(&circuit.data, cregbundle, mergewires, fold)?;
-    Ok(())
+) -> PyResult<String> {
+    draw_circuit(&circuit.data, cregbundle, mergewires, fold)
 }
 
 pub fn draw_circuit(
@@ -50,14 +49,14 @@ pub fn draw_circuit(
     cregbundle: bool,
     mergewires: bool,
     fold: Option<usize>,
-) -> PyResult<()> {
+) -> PyResult<String> {
     let vis_mat = VisualizationMatrix::from_circuit(circuit, cregbundle)?;
 
     let circuit_rep = TextDrawer::from_visualization_matrix(&vis_mat, cregbundle);
 
-    circuit_rep.print(mergewires, fold);
+    let output = circuit_rep.print(mergewires, fold);
 
-    Ok(())
+    Ok(output)
 }
 
 /// Return a list of layers such that each layer contains a list of op node indices, representing instructions
@@ -1404,7 +1403,7 @@ impl TextDrawer {
         }
     }
 
-    fn print(&self, mergewires: bool, fold: Option<usize>) {
+    fn print(&self, mergewires: bool, fold: Option<usize>) -> String {
         let ranges: Vec<(usize, usize)> = match fold {
             Some(f) => {
                 let mut temp_ranges = vec![];
@@ -1427,9 +1426,11 @@ impl TextDrawer {
             None => vec![(0, self.wires[0].len())],
         };
 
+        let mut output = String::new();
+
         for (j, (start, end)) in ranges.iter().enumerate() {
             if !mergewires {
-                let mut output = String::new();
+                
                 for (i, element) in self.wires.iter().enumerate() {
                     let mut top_line: String = element
                         .iter()
@@ -1457,7 +1458,6 @@ impl TextDrawer {
                     bot_line.push_str(if j == ranges.len() - 1 { "" } else { "»" });
                     output.push_str(&format!("{}\n{}\n{}\n", top_line, mid_line, bot_line));
                 }
-                println!("{}", output);
             } else {
                 let num_wires = self.wires.len();
                 for i in 0..num_wires - 1 {
@@ -1478,8 +1478,7 @@ impl TextDrawer {
                             .collect::<Vec<String>>()
                             .join("");
                         mid_line.push_str(if j == ranges.len() - 1 { "" } else { "»" });
-                        println!("{}", top_line);
-                        println!("{}", mid_line);
+                        output.push_str(&format!("{}\n{}\n", top_line, mid_line));
                     }
                     let mut bot_line = self.wires[i]
                         .iter()
@@ -1498,9 +1497,10 @@ impl TextDrawer {
                         .map(|(_, wire)| wire.top.clone()) // And here
                         .collect::<Vec<String>>()
                         .join("");
+
                     top_line_next.push_str(if j == ranges.len() - 1 { "" } else { "»" });
                     let mut merged_line = Self::merge_lines(&bot_line, &top_line_next, "top");
-                    println!("{}", merged_line);
+                    output.push_str(&format!("{}\n", merged_line));
                     let mut mid_line_next = self.wires[i + 1]
                         .iter()
                         .enumerate()
@@ -1509,7 +1509,7 @@ impl TextDrawer {
                         .collect::<Vec<String>>()
                         .join("");
                     mid_line_next.push_str(if j == ranges.len() - 1 { "" } else { "»" });
-                    println!("{}", mid_line_next);
+                    output.push_str(&format!("{}\n", mid_line_next));
                 }
                 let last_index = num_wires - 1;
                 let mut bot_line = self.wires[last_index]
@@ -1520,9 +1520,10 @@ impl TextDrawer {
                     .collect::<Vec<String>>()
                     .join("");
                 bot_line.push_str(if j == ranges.len() - 1 { "" } else { "»" });
-                println!("{}", bot_line);
+                output.push_str(&format!("{}\n", bot_line));
             }
         }
+        return output;
     }
 
     pub fn merge_lines(top: &str, bot: &str, icod: &str) -> String {
