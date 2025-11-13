@@ -16,6 +16,7 @@ use crate::operations::{Operation, OperationRef, Param, StandardGate, StandardIn
 use crate::packed_instruction::PackedInstruction;
 use crate::{Clbit, Qubit};
 use core::panic;
+use crossterm::terminal::size;
 use hashbrown::{HashMap, HashSet};
 use itertools::{Itertools, MinMaxResult};
 use rustworkx_core::petgraph::csr::IndexType;
@@ -53,6 +54,14 @@ pub fn draw_circuit(
     let vis_mat = VisualizationMatrix::from_circuit(circuit, cregbundle)?;
 
     let circuit_rep = TextDrawer::from_visualization_matrix(&vis_mat, cregbundle);
+
+    let fold = match fold {
+        Some(f) => f,
+        None => {
+            let (term_width, _) = size().unwrap_or((80, 24));
+            term_width as usize
+        }
+    };
 
     let output = circuit_rep.print(mergewires, fold);
 
@@ -264,13 +273,18 @@ impl<'a> VisualizationLayer<'a> {
     }
 
     /// Adds the required visualization elements to represent the given instruction
-    fn add_instruction(&mut self, inst: &'a PackedInstruction, circuit: &CircuitData) {
+    fn add_instruction(
+        &mut self,
+        cregbundle: bool,
+        inst: &'a PackedInstruction,
+        circuit: &CircuitData,
+    ) {
         match inst.op.view() {
             OperationRef::StandardGate(gate) => {
                 self.add_standard_gate(gate, inst, circuit);
             }
             OperationRef::StandardInstruction(std_inst) => {
-                self.add_standard_instruction(std_inst, inst, circuit);
+                self.add_standard_instruction(cregbundle, std_inst, inst, circuit);
             }
             _ => unimplemented!(
                 "{}",
@@ -421,6 +435,10 @@ impl<'a> VisualizationLayer<'a> {
             StandardGate::GlobalPhase => {}
             StandardGate::Swap | StandardGate::CSwap => {
                 // taking the last 2 elements of qargs
+                if gate == StandardGate::CSwap {
+                    let control = vec![qargs[0].0 as usize];
+                    self.add_controls(&control, (minima, maxima));
+                }
                 let swap_qubits = qargs.iter().map(|q| q.0 as usize).rev().take(2);
                 for qubit in swap_qubits {
                     if qubit == minima {
@@ -444,6 +462,7 @@ impl<'a> VisualizationLayer<'a> {
 
     fn add_standard_instruction(
         &mut self,
+        cregbundle: bool,
         std_inst: StandardInstruction,
         inst: &'a PackedInstruction,
         circuit: &CircuitData,
@@ -466,6 +485,22 @@ impl<'a> VisualizationLayer<'a> {
             StandardInstruction::Measure => {
                 self.0[qargs.last().unwrap().index()] =
                     VisualizationElement::Boxed(Boxed::Single(inst));
+                let maxima = {
+                    if !cregbundle {
+                        maxima
+                    } else {
+                        let shareable_clbit = circuit
+                            .clbits()
+                            .get(circuit.get_cargs(inst.clbits)[0])
+                            .unwrap();
+                        let creg = circuit
+                            .cregs()
+                            .iter()
+                            .position(|r| r.contains(shareable_clbit))
+                            .unwrap();
+                        circuit.num_qubits() + creg
+                    }
+                };
                 self.add_vertical_lines(inst, minima + 1..maxima);
                 self.0[maxima] =
                     VisualizationElement::DirectOnWire(OnWire::Control(ElementOnWire::Bot))
@@ -537,7 +572,11 @@ impl<'a> VisualizationMatrix<'a> {
 
         for (i, layer) in inst_layers.iter().enumerate() {
             for node_index in layer {
-                layers[i + 1].add_instruction(node_index_to_inst.get(node_index).unwrap(), circuit);
+                layers[i + 1].add_instruction(
+                    bundle_cregs,
+                    node_index_to_inst.get(node_index).unwrap(),
+                    circuit,
+                );
             }
         }
 
@@ -1349,7 +1388,7 @@ impl TextDrawer {
                 }
                 ElementWireInput::Creg(creg) => {
                     let wire_name = format!("{}: {}/", creg.name(), creg.len());
-                    
+
                     ElementWire {
                         top: format!("{}", " ".repeat(wire_name.len())),
                         mid: format!("{}", wire_name),
@@ -1403,34 +1442,29 @@ impl TextDrawer {
         }
     }
 
-    fn print(&self, mergewires: bool, fold: Option<usize>) -> String {
-        let ranges: Vec<(usize, usize)> = match fold {
-            Some(f) => {
-                let mut temp_ranges = vec![];
-                let mut layer_counter: usize = 1;
-                let total_layers = self.wires[0].len();
-                while layer_counter < self.wires[0].len() {
-                    let mut total_width: usize = 0;
-                    total_width += self.get_layer_width(0);
+    fn print(&self, mergewires: bool, fold: usize) -> String {
+        let ranges: Vec<(usize, usize)> = {
+            let mut temp_ranges = vec![];
+            let mut layer_counter: usize = 1;
+            while layer_counter < self.wires[0].len() {
+                let mut total_width: usize = 0;
+                total_width += self.get_layer_width(0);
 
-                    let start = layer_counter;
-                    while total_width <= f && layer_counter < self.wires[0].len() {
-                        total_width += self.get_layer_width(layer_counter);
-                        layer_counter += 1;
-                    }
-                    let end = layer_counter;
-                    temp_ranges.push((start, end));
+                let start = layer_counter;
+                while total_width <= fold && layer_counter < self.wires[0].len() {
+                    total_width += self.get_layer_width(layer_counter);
+                    layer_counter += 1;
                 }
-                temp_ranges
+                let end = layer_counter;
+                temp_ranges.push((start, end));
             }
-            None => vec![(0, self.wires[0].len())],
+            temp_ranges
         };
 
         let mut output = String::new();
 
         for (j, (start, end)) in ranges.iter().enumerate() {
             if !mergewires {
-                
                 for (i, element) in self.wires.iter().enumerate() {
                     let mut top_line: String = element
                         .iter()
