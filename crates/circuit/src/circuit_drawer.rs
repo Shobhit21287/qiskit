@@ -1077,6 +1077,7 @@ impl TextDrawer {
 
                 let is_top_case = |ve: &VisualizationElement| match ve {
                     VisualizationElement::DirectOnWire(OnWire::Control(ElementOnWire::Top))
+                    | VisualizationElement::DirectOnWire(OnWire::Control(ElementOnWire::Mid))
                     | VisualizationElement::DirectOnWire(OnWire::Swap(ElementOnWire::Top))
                     | VisualizationElement::DirectOnWire(OnWire::Swap(ElementOnWire::Mid))
                     | VisualizationElement::VerticalLine(InputType::Qubit(None))
@@ -1086,6 +1087,7 @@ impl TextDrawer {
 
                 let is_bot_case = |ve: &VisualizationElement| match ve {
                     VisualizationElement::DirectOnWire(OnWire::Control(ElementOnWire::Bot))
+                    | VisualizationElement::DirectOnWire(OnWire::Control(ElementOnWire::Mid))
                     | VisualizationElement::DirectOnWire(OnWire::Swap(ElementOnWire::Bot))
                     | VisualizationElement::DirectOnWire(OnWire::Swap(ElementOnWire::Mid))
                     | VisualizationElement::VerticalLine(InputType::Qubit(None))
