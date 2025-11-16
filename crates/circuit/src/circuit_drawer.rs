@@ -170,22 +170,80 @@ enum InputType {
     Clbit(Option<String>),
 }
 
-/// Enum for representing elements that can appear directly on a wire.
-#[derive(Clone, Debug, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum ElementOnWire {
-    Top,
-    Mid,
-    Bot,
-}
-
 /// Enum for representing elements that appear directly on a wire and how they're connected.
-#[derive(Clone, Debug, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum OnWire {
-    Control(ElementOnWire),
-    Swap(ElementOnWire),
+#[derive(Clone, Debug, Copy)]
+enum OnWire<'a> {
+    Control(&'a PackedInstruction),
+    Swap(&'a PackedInstruction),
     Barrier,
     Reset,
 }
+
+enum PosOnWire{
+    Top,
+    Mid,
+    Bot
+}
+
+impl OnWire<'_> {
+    fn is_pos(&self, circuit: &CircuitData, ind: usize) -> PosOnWire {
+        match self {
+            OnWire::Control(inst) 
+            | OnWire::Swap(inst)=> {
+                let node_qubits = circuit.get_qargs(inst.qubits);
+                let node_clbits = circuit.get_cargs(inst.clbits);
+                let num_qubits = circuit.num_qubits();
+                let range = get_instruction_range(node_qubits, node_clbits, num_qubits);
+                if ind == range.0 {
+                    PosOnWire::Top
+                } else if ind == range.1 {
+                    PosOnWire::Bot
+                } else {
+                    PosOnWire::Mid
+                }
+            },
+            OnWire::Reset | OnWire::Barrier => PosOnWire::Mid,
+        }
+    }
+}
+
+impl PartialEq for OnWire<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (OnWire::Control(_), OnWire::Control(_)) => true,
+            (OnWire::Swap(_), OnWire::Swap(_)) => true,
+            (OnWire::Barrier, OnWire::Barrier) => true,
+            (OnWire::Reset, OnWire::Reset) => true,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for OnWire<'_> {}
+
+impl PartialOrd for OnWire<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for OnWire<'_> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match (self, other) {
+            (OnWire::Control(_), OnWire::Control(_)) => std::cmp::Ordering::Equal,
+            (OnWire::Swap(_), OnWire::Swap(_)) => std::cmp::Ordering::Equal,
+            (OnWire::Barrier, OnWire::Barrier) => std::cmp::Ordering::Equal,
+            (OnWire::Reset, OnWire::Reset) => std::cmp::Ordering::Equal,
+            (OnWire::Control(_), _) => std::cmp::Ordering::Less,
+            (OnWire::Swap(_), OnWire::Control(_)) => std::cmp::Ordering::Greater,
+            (OnWire::Swap(_), _) => std::cmp::Ordering::Less,
+            (OnWire::Barrier, OnWire::Reset) => std::cmp::Ordering::Less,
+            (OnWire::Barrier, _) => std::cmp::Ordering::Greater,
+            (OnWire::Reset, _) => std::cmp::Ordering::Greater,
+        }
+    }
+}
+
 
 /// Enum for representing elements that appear in a boxed operation.
 #[derive(Clone)]
@@ -247,7 +305,7 @@ enum VisualizationElement<'a> {
     Empty, // Marker for no element
     VerticalLine(InputType),
     Input(ElementWireInput<'a>),
-    DirectOnWire(OnWire),
+    DirectOnWire(OnWire<'a>),
     Boxed(Boxed<'a>),
 }
 
@@ -296,18 +354,9 @@ impl<'a> VisualizationLayer<'a> {
         }
     }
 
-    fn add_controls(&mut self, controls: &Vec<usize>, range: (usize, usize)) {
+    fn add_controls(&mut self, inst: &'a PackedInstruction, controls: &Vec<usize>, range: (usize, usize)) {
         for control in controls {
-            if *control == range.0 {
-                self.0[*control] =
-                    VisualizationElement::DirectOnWire(OnWire::Control(ElementOnWire::Top));
-            } else if *control == range.1 {
-                self.0[*control] =
-                    VisualizationElement::DirectOnWire(OnWire::Control(ElementOnWire::Bot));
-            } else {
-                self.0[*control] =
-                    VisualizationElement::DirectOnWire(OnWire::Control(ElementOnWire::Mid));
-            }
+            self.0[*control] = VisualizationElement::DirectOnWire(OnWire::Control(inst));
         }
     }
 
@@ -418,7 +467,7 @@ impl<'a> VisualizationLayer<'a> {
                 self.0[qargs.last().unwrap().index()] =
                     VisualizationElement::Boxed(Boxed::Single(inst));
                 if gate.num_ctrl_qubits() > 0 {
-                    self.add_controls(
+                    self.add_controls(inst,
                         &qargs
                             .iter()
                             .take(qargs.len() - 1)
@@ -437,20 +486,11 @@ impl<'a> VisualizationLayer<'a> {
                 // taking the last 2 elements of qargs
                 if gate == StandardGate::CSwap {
                     let control = vec![qargs[0].0 as usize];
-                    self.add_controls(&control, (minima, maxima));
+                    self.add_controls(inst,&control, (minima, maxima));
                 }
                 let swap_qubits = qargs.iter().map(|q| q.0 as usize).rev().take(2);
                 for qubit in swap_qubits {
-                    if qubit == minima {
-                        self.0[qubit] =
-                            VisualizationElement::DirectOnWire(OnWire::Swap(ElementOnWire::Top));
-                    } else if qubit == maxima {
-                        self.0[qubit] =
-                            VisualizationElement::DirectOnWire(OnWire::Swap(ElementOnWire::Bot));
-                    } else {
-                        self.0[qubit] =
-                            VisualizationElement::DirectOnWire(OnWire::Swap(ElementOnWire::Mid));
-                    }
+                    self.0[qubit] = VisualizationElement::DirectOnWire(OnWire::Swap(inst));
                 }
 
                 let vert_lines = (minima..=maxima)
@@ -503,7 +543,7 @@ impl<'a> VisualizationLayer<'a> {
                 };
                 self.add_vertical_lines(inst, minima + 1..maxima);
                 self.0[maxima] =
-                    VisualizationElement::DirectOnWire(OnWire::Control(ElementOnWire::Bot))
+                    VisualizationElement::DirectOnWire(OnWire::Control(inst))
             }
             StandardInstruction::Delay(_) => {
                 for q in qargs {
@@ -1059,7 +1099,6 @@ impl TextDrawer {
                 // wire.pad_wire('$', layer_width);
             }
         }
-
         wires
     }
 
@@ -1075,21 +1114,27 @@ impl TextDrawer {
                 // implement for cases where the box is on classical wires. The left and right connectors will change
                 // from single wired to double wired.
 
+                // decide whether the boxed element needs a top connector or not
+
                 let is_top_case = |ve: &VisualizationElement| match ve {
-                    VisualizationElement::DirectOnWire(OnWire::Control(ElementOnWire::Top))
-                    | VisualizationElement::DirectOnWire(OnWire::Swap(ElementOnWire::Top))
-                    | VisualizationElement::DirectOnWire(OnWire::Swap(ElementOnWire::Mid))
-                    | VisualizationElement::VerticalLine(InputType::Qubit(None))
+                    VisualizationElement::VerticalLine(InputType::Qubit(None))
                     | VisualizationElement::VerticalLine(InputType::Clbit(None)) => true,
+                    VisualizationElement::DirectOnWire(onwire) => match onwire.is_pos(circuit, ind){
+                        PosOnWire::Bot => false,
+                        _ => true
+                    },
                     _ => false,
                 };
 
+                // decide whether the boxed element needs a bottom connector or not
+
                 let is_bot_case = |ve: &VisualizationElement| match ve {
-                    VisualizationElement::DirectOnWire(OnWire::Control(ElementOnWire::Bot))
-                    | VisualizationElement::DirectOnWire(OnWire::Swap(ElementOnWire::Bot))
-                    | VisualizationElement::DirectOnWire(OnWire::Swap(ElementOnWire::Mid))
-                    | VisualizationElement::VerticalLine(InputType::Qubit(None))
+                    VisualizationElement::VerticalLine(InputType::Qubit(None))
                     | VisualizationElement::VerticalLine(InputType::Clbit(None)) => true,
+                    VisualizationElement::DirectOnWire(onwire) => match onwire.is_pos(circuit, ind){
+                        PosOnWire::Top => false,
+                        _ => true
+                    },
                     _ => false,
                 };
 
@@ -1122,7 +1167,7 @@ impl TextDrawer {
                 };
 
                 let bot_con = {
-                    if ind + 1 < vis_layer.0.len() {
+                    if ind + 1 <= vis_layer.0.len() {         
                         if is_bot_case(&vis_layer.0[ind + 1]) {
                             if is_measure { C_BOT_CON } else { BOT_CON }
                         } else {
@@ -1132,6 +1177,8 @@ impl TextDrawer {
                         Q_WIRE
                     }
                 };
+
+                println!("ind: {}, len: {}, bot char: {}", ind, vis_layer.0.len(), bot_con);
 
                 match sub_type {
                     Boxed::Single(inst) => {
@@ -1302,15 +1349,11 @@ impl TextDrawer {
                 };
 
                 let top: String = match on_wire {
-                    OnWire::Control(position) => match position {
-                        ElementOnWire::Top => " ".to_string(),
-                        ElementOnWire::Mid => format!("{}", connecting_wire),
-                        ElementOnWire::Bot => format!("{}", connecting_wire),
-                    },
-                    OnWire::Swap(position) => match position {
-                        ElementOnWire::Top => " ".to_string(),
-                        ElementOnWire::Mid => format!("{}", connecting_wire),
-                        ElementOnWire::Bot => format!("{}", connecting_wire),
+                    OnWire::Control(position)
+                    | OnWire::Swap(position) => match on_wire.is_pos(circuit, ind) {
+                        PosOnWire::Top => " ".to_string(),
+                        PosOnWire::Mid => format!("{}", connecting_wire),
+                        PosOnWire::Bot => format!("{}", connecting_wire),
                     },
                     OnWire::Barrier => {
                         format!("{}", BARRIER)
@@ -1319,21 +1362,32 @@ impl TextDrawer {
                 };
 
                 let bot: String = match on_wire {
-                    OnWire::Control(position) => match position {
-                        ElementOnWire::Top => format!("{}", connecting_wire),
-                        ElementOnWire::Mid => format!("{}", connecting_wire),
-                        ElementOnWire::Bot => {
-                            if *cregbundle && ind > circuit.num_qubits() {
-                                format!("{}", ind - circuit.num_qubits())
+                    OnWire::Control(inst) => match on_wire.is_pos(circuit, ind) {
+                        PosOnWire::Top => format!("{}", connecting_wire),
+                        PosOnWire::Mid => format!("{}", connecting_wire),
+                        PosOnWire::Bot => {
+                            if *cregbundle && ind >= circuit.num_qubits() {
+                                // we assume there will only be a single classical bit for now since the current implementation
+                                // only covers measurements as an instruction that operates both on classical and quantum bits.
+                                let clbit = circuit.cargs_interner().get(inst.clbits).first().unwrap();
+                                // getting shareable clbit
+                                let shareable_clbit = circuit.clbits().get(*clbit).unwrap();
+                                let bit_info = circuit.clbit_indices().get(shareable_clbit).unwrap();
+                                let clbit_ind = if let Some((_, index_in_creg)) = bit_info.registers().first() {
+                                    format!("{}", index_in_creg)
+                                } else {
+                                    format!("{}", ind - circuit.num_qubits())
+                                };
+                                format!("{}", clbit_ind)
                             } else {
                                 " ".to_string()
                             }
                         }
                     },
-                    OnWire::Swap(position) => match position {
-                        ElementOnWire::Top => format!("{}", connecting_wire),
-                        ElementOnWire::Mid => format!("{}", connecting_wire),
-                        ElementOnWire::Bot => " ".to_string(),
+                    OnWire::Swap(_) => match on_wire.is_pos(circuit, ind){
+                        PosOnWire::Top => format!("{}", connecting_wire),
+                        PosOnWire::Mid => format!("{}", connecting_wire),
+                        PosOnWire::Bot => " ".to_string(),
                     },
                     OnWire::Barrier => {
                         format!("{}", BARRIER)
