@@ -133,15 +133,33 @@ enum ElementWireInput<'a> {
     Creg(&'a ClassicalRegister), // To be used when bundling cregs
 }
 
-impl<'a> Debug for ElementWireInput<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let name = match self {
-            ElementWireInput::Qubit(_) => "Qubit",
-            ElementWireInput::Clbit(_) => "Clbit",
-            ElementWireInput::Creg(_) => "Creg",
-        };
-
-        write!(f, "{}", name)
+impl<'a> ElementWireInput<'a> {
+    fn get_name(&self, circuit: &CircuitData) -> Option<String> {
+        match self {
+            Self::Qubit(qubit) => {
+                if let Some(bit_info) = circuit.qubit_indices().get(qubit) {
+                    let (register, index) = bit_info
+                        .registers()
+                        .first()
+                        .expect("Register cannot be empty");
+                    Some(format!("{}_{}: ", register.name(), index))
+                } else {
+                    None
+                }
+            }
+            ElementWireInput::Clbit(clbit) => {
+                if let Some(bit_info) = circuit.clbit_indices().get(clbit) {
+                    let (register, index) = bit_info
+                        .registers()
+                        .first()
+                        .expect("Register cannot be empty");
+                    Some(format!("{}_{}: ", register.name(), index))
+                } else {
+                    None
+                }
+            }
+            ElementWireInput::Creg(creg) => Some(format!("{}: {}/", creg.name(), creg.len())),
+        }
     }
 }
 
@@ -272,20 +290,21 @@ impl<'a> Debug for Boxed<'a> {
 /// do not directly implement visualization capabilities, but rather carry enough information
 /// to enable visualization later on by the actual drawer.
 
-#[derive(Default, Clone, Debug)]
+#[derive(Default, Clone)]
 enum VisualizationElement<'a> {
     #[default]
     Empty,
     /// Vertical line (e.g for control of measure).
     /// The bool indicates whether this is a single (false) or double (true) line
     VerticalLine(bool),
+    /// Circuit input wires (qubit, clbit, creg)
     Input(ElementWireInput<'a>),
     DirectOnWire(OnWire<'a>),
     Boxed(Boxed<'a>),
 }
 
 /// A representation of a single column (called here a layer) of a visualization matrix
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 struct VisualizationLayer<'a>(Vec<VisualizationElement<'a>>);
 
 impl<'a> Index<usize> for VisualizationLayer<'a> {
@@ -1242,36 +1261,16 @@ impl TextDrawer {
                 println!("ElementWire: {:?}", ret);
                 ret
             }
-            VisualizationElement::Input(wire_input) => {
-                let wire_name = match wire_input {
-                    ElementWireInput::Qubit(qubit) => {
-                        if let Some(bit_info) = circuit.qubit_indices().get(qubit) {
-                            let (register, index) = bit_info
-                                .registers()
-                                .first()
-                                .expect("Register cannot be empty");
-                            format!("{}_{}: ", register.name(), index)
-                        } else {
-                            format!("q_{}: ", ind)
-                        }
-                    }
-                    ElementWireInput::Clbit(clbit) => {
-                        if let Some(bit_info) = circuit.clbit_indices().get(clbit) {
-                            let (register, index) = bit_info
-                                .registers()
-                                .first()
-                                .expect("Register cannot be empty");
-                            format!("{}_{}: ", register.name(), index)
-                        } else {
-                            format!("q_{}: ", ind)
-                        }
-                    }
-                    ElementWireInput::Creg(creg) => format!("{}: {}/", creg.name(), creg.len()),
-                };
+            VisualizationElement::Input(input) => {
+                let input_name = input.get_name(circuit).unwrap_or_else(|| match input {
+                    ElementWireInput::Clbit(_) => format!("q_{}: ", ind),
+                    ElementWireInput::Qubit(_) => format!("c_{}: ", ind),
+                    ElementWireInput::Creg(_) => unreachable!(),
+                });
                 ElementWire {
-                    top: format!("{}", " ".repeat(wire_name.len())),
-                    mid: format!("{}", wire_name),
-                    bot: format!("{}", " ".repeat(wire_name.len())),
+                    top: format!("{}", " ".repeat(input_name.len())),
+                    mid: format!("{}", input_name),
+                    bot: format!("{}", " ".repeat(input_name.len())),
                 }
             }
             VisualizationElement::VerticalLine(is_double) => {
