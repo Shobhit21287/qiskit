@@ -199,91 +199,11 @@ impl OnWire<'_> {
     }
 }
 
-impl PartialEq for OnWire<'_> {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (OnWire::Control(_), OnWire::Control(_)) => true,
-            (OnWire::Swap(_), OnWire::Swap(_)) => true,
-            (OnWire::Barrier, OnWire::Barrier) => true,
-            (OnWire::Reset, OnWire::Reset) => true,
-            _ => false,
-        }
-    }
-}
-
-impl Eq for OnWire<'_> {}
-
-impl PartialOrd for OnWire<'_> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for OnWire<'_> {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        match (self, other) {
-            (OnWire::Control(_), OnWire::Control(_)) => std::cmp::Ordering::Equal,
-            (OnWire::Swap(_), OnWire::Swap(_)) => std::cmp::Ordering::Equal,
-            (OnWire::Barrier, OnWire::Barrier) => std::cmp::Ordering::Equal,
-            (OnWire::Reset, OnWire::Reset) => std::cmp::Ordering::Equal,
-            (OnWire::Control(_), _) => std::cmp::Ordering::Less,
-            (OnWire::Swap(_), OnWire::Control(_)) => std::cmp::Ordering::Greater,
-            (OnWire::Swap(_), _) => std::cmp::Ordering::Less,
-            (OnWire::Barrier, OnWire::Reset) => std::cmp::Ordering::Less,
-            (OnWire::Barrier, _) => std::cmp::Ordering::Greater,
-            (OnWire::Reset, _) => std::cmp::Ordering::Greater,
-        }
-    }
-}
-
-/// Enum for representing elements that appear in a boxed operation.
+/// Represent elements that appear in a boxed operation.
 #[derive(Clone)]
 enum Boxed<'a> {
     Single(&'a PackedInstruction),
-    // Multi(MultiBoxElement)
     Multi(&'a PackedInstruction),
-}
-
-// This is a temporary work around for a derive issue
-// however the behaviour of this PartialEq is not ideal as it only checks the variant type
-// because PackedInstructions cannot be compared directly
-
-impl PartialOrd for Boxed<'_> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl PartialEq for Boxed<'_> {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Boxed::Single(_), Boxed::Single(_)) => true,
-            (Boxed::Multi(_), Boxed::Multi(_)) => true,
-            _ => false,
-        }
-    }
-}
-
-impl Eq for Boxed<'_> {}
-
-impl Ord for Boxed<'_> {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        match (self, other) {
-            (Boxed::Single(_), Boxed::Single(_)) => std::cmp::Ordering::Equal,
-            (Boxed::Multi(_), Boxed::Multi(_)) => std::cmp::Ordering::Equal,
-            (Boxed::Single(_), Boxed::Multi(_)) => std::cmp::Ordering::Less,
-            (Boxed::Multi(_), Boxed::Single(_)) => std::cmp::Ordering::Greater,
-        }
-    }
-}
-
-impl<'a> Debug for Boxed<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Boxed::Single(inst) => write!(f, "Boxed({})", inst.op.name()),
-            Boxed::Multi(inst) => write!(f, "MultiBox({})", inst.op.name()),
-        }
-    }
 }
 
 /// Enum for representing the elements stored in the visualization matrix. The elements
@@ -299,8 +219,9 @@ enum VisualizationElement<'a> {
     VerticalLine(bool),
     /// Circuit input element (qubit, clbit, creg).
     Input(ElementWireInput<'a>),
-    /// Element which is drawn without a surrounding box. Used only on qubit wire elements
+    /// Element which is drawn without a surrounding box. Used only on qubit wires
     DirectOnWire(OnWire<'a>),
+    // Boxed element which can span one or more wires. Used only on qubit wires
     Boxed(Boxed<'a>),
 }
 
@@ -378,7 +299,6 @@ impl<'a> VisualizationLayer<'a> {
             StandardGate::ISwap
             | StandardGate::DCX
             | StandardGate::ECR
-            | StandardGate::ISwap
             | StandardGate::RXX
             | StandardGate::RYY
             | StandardGate::RZZ
@@ -391,23 +311,6 @@ impl<'a> VisualizationLayer<'a> {
                     self.0[q.index()] = VisualizationElement::Boxed(Boxed::Multi(inst));
                 }
             }
-            // StandardGate::Swap | StandardGate::CSwap => {
-            //     // qargs[qargs.len() - 1..].iter().map(|q| q.index()).collect()
-            //     // for target in targets {
-            //     //         if *target == range.0 {
-            //     //             self.0[*target] = VisualizationElement::DirectOnWire(OnWire::Swap(
-            //     //                 ElementOnWire::Top,
-            //     //             ));
-            //     //         } else if *target == range.1 {
-            //     //             self.0[*target] = VisualizationElement::DirectOnWire(OnWire::Swap(
-            //     //                 ElementOnWire::Bot,
-            //     //             ));
-            //     //         } else {
-            //     //             self.0[*target] = VisualizationElement::DirectOnWire(OnWire::Swap(
-            //     //                 ElementOnWire::Mid,
-            //     //             ));
-            //     //         }
-            // },
             StandardGate::H
             | StandardGate::I
             | StandardGate::X
@@ -788,10 +691,7 @@ impl Debug for TextDrawer {
 
 impl TextDrawer {
     fn get_label(instruction: &PackedInstruction) -> String {
-        if let Some(label) = instruction.label() {
-            return format!(" {} ", label.to_string());
-        }
-
+        
         if let Some(std_instruction) = instruction.op.try_standard_instruction() {
             return match std_instruction {
                 StandardInstruction::Measure => "M".to_string(),
@@ -802,7 +702,8 @@ impl TextDrawer {
                 }
             };
         }
-
+        
+        let custom_label = instruction.label();
         if let Some(standard_gate) = instruction.op.try_standard_gate() {
             let mut label = match standard_gate {
                 StandardGate::GlobalPhase => "",
@@ -860,6 +761,9 @@ impl TextDrawer {
             }
             .to_string();
 
+            if custom_label.is_some() && custom_label.unwrap() != label {
+                label = custom_label.unwrap().to_string();
+            }
             if standard_gate.num_params() > 0 {
                 let params = instruction
                     .params_view()
@@ -1014,49 +918,16 @@ impl TextDrawer {
                     }
                     Boxed::Multi(inst) => {
                         let label = Self::get_label(inst);
-                        // get all the indices affected by this multi-box
-                        let qargs = circuit
-                            .qargs_interner()
-                            .get(inst.qubits)
-                            .into_iter()
-                            .map(|q| q.index())
-                            .collect_vec();
-                        let cargs = circuit
-                            .cargs_interner()
-                            .get(inst.clbits)
-                            .into_iter()
-                            .map(|c| c.index() + circuit.num_qubits())
-                            .collect_vec();
-                        let minmax = qargs.iter().chain(cargs.iter()).minmax();
-                        let range = match minmax {
-                            MinMaxResult::MinMax(min, max) => (*min, *max),
-                            MinMaxResult::OneElement(idx) => (*idx, *idx),
-                            MinMaxResult::NoElements => {
-                                panic!("Encountered an multi-qubit without qubits and clbits")
-                            }
-                        };
-                        let mid = (range.0 + range.1) / 2;
+                        let qargs = circuit.get_qargs(inst.qubits);
+                        let (minima, maxima) = get_instruction_range(qargs, &[], 0);
+                        let mid = (minima + maxima) / 2;
 
-                        let num_affected = {
-                            if qargs.contains(&ind) || cargs.contains(&ind) {
-                                // Once the packed instruction can handle custom gates, we need to first check the number of controls
-                                // and then give an index to the qubit in the multibox an index based on whats left. For example, if the
-                                // qubits being affected are [0,1,2,3,4,5] and num controls is 2, then the qubits will be indexed as [C,C,T,T,T,T]
-                                // so for qubits [2,3,4,5] the indexes inside the box will be 0,1,2,3 respectively.
-
-                                let temp: String = {
-                                    if qargs.contains(&ind) {
-                                        let idx = qargs.iter().position(|&x| x == ind).unwrap();
-                                        format!("{:^width$}", idx, width = qargs.len())
-                                    } else {
-                                        " ".to_string()
-                                    }
-                                };
-                                temp
+                        let num_affected =
+                            if let Some(idx) = qargs.iter().position(|&x| x.index() == ind) {
+                                format!("{:^width$}", idx, width = qargs.len())
                             } else {
                                 " ".to_string()
-                            }
-                        };
+                            };
 
                         let mid_section = if ind == mid {
                             format!(
@@ -1078,60 +949,43 @@ impl TextDrawer {
 
                         let left_len = (mid_section.len() - 1) / 2;
                         let right_len = mid_section.len() - left_len - 1;
-
-                        if ind == range.0 {
-                            ElementWire {
-                                top: format!(
-                                    "{}{}{}{}{}",
-                                    TOP_LEFT_BOX,
-                                    Q_WIRE.to_string().repeat(left_len),
-                                    Q_WIRE,
-                                    Q_WIRE.to_string().repeat(right_len),
-                                    TOP_RIGHT_BOX
-                                ),
-                                mid: format!("{}{}{}", Q_LEFT_CON, mid_section, Q_RIGHT_CON),
-                                bot: format!(
-                                    "{}{}{}",
-                                    CONNECTING_WIRE,
-                                    " ".repeat(mid_section.len()),
-                                    CONNECTING_WIRE
-                                ),
-                            }
-                        } else if ind == range.1 {
-                            ElementWire {
-                                top: format!(
-                                    "{}{}{}",
-                                    CONNECTING_WIRE,
-                                    " ".to_string().repeat(mid_section.len()),
-                                    CONNECTING_WIRE
-                                ),
-                                mid: format!("{}{}{}", Q_LEFT_CON, mid_section, Q_RIGHT_CON),
-                                bot: format!(
-                                    "{}{}{}{}{}",
-                                    BOT_LEFT_BOX,
-                                    Q_WIRE.to_string().repeat(left_len),
-                                    Q_WIRE,
-                                    Q_WIRE.to_string().repeat(right_len),
-                                    BOT_RIGHT_BOX
-                                ),
-                            }
+                        let top = if ind == minima {
+                            format!(
+                                "{}{}{}{}{}",
+                                TOP_LEFT_BOX,
+                                Q_WIRE.to_string().repeat(left_len),
+                                Q_WIRE,
+                                Q_WIRE.to_string().repeat(right_len),
+                                TOP_RIGHT_BOX
+                            )
                         } else {
-                            ElementWire {
-                                top: format!(
-                                    "{}{}{}",
-                                    CONNECTING_WIRE,
-                                    " ".repeat(mid_section.len()),
-                                    CONNECTING_WIRE
-                                ),
-                                mid: format!("{}{}{}", Q_LEFT_CON, mid_section, Q_RIGHT_CON),
-                                bot: format!(
-                                    "{}{}{}",
-                                    CONNECTING_WIRE,
-                                    " ".repeat(mid_section.len()),
-                                    CONNECTING_WIRE
-                                ),
-                            }
-                        }
+                            format!(
+                                "{}{}{}",
+                                CONNECTING_WIRE,
+                                " ".repeat(mid_section.len()),
+                                CONNECTING_WIRE
+                            )
+                        };
+                        let mid = format!("{}{}{}", Q_LEFT_CON, mid_section, Q_RIGHT_CON);
+                        let bot = if ind == maxima {
+                            format!(
+                                "{}{}{}{}{}",
+                                BOT_LEFT_BOX,
+                                Q_WIRE.to_string().repeat(left_len),
+                                Q_WIRE,
+                                Q_WIRE.to_string().repeat(right_len),
+                                BOT_RIGHT_BOX
+                            )
+                        } else {
+                            format!(
+                                "{}{}{}",
+                                CONNECTING_WIRE,
+                                " ".repeat(mid_section.len()),
+                                CONNECTING_WIRE
+                            )
+                        };
+
+                        ElementWire { top, mid, bot }
                     }
                 }
             }
