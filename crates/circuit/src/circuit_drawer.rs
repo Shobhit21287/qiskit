@@ -1107,7 +1107,7 @@ impl TextDrawer {
                         .join("");
 
                     top_line_next.push_str(if j == ranges.len() - 1 { "" } else { "»" });
-                    let merged_line = Self::merge_lines(&bot_line, &top_line_next, "top");
+                    let merged_line = Self::merge_lines(&bot_line, &top_line_next);
                     output.push_str(&format!("{}\n", merged_line));
                     let mut mid_line_next = self.wires[i + 1]
                         .iter()
@@ -1134,7 +1134,7 @@ impl TextDrawer {
         output
     }
 
-    pub fn merge_lines(top: &str, bot: &str, icod: &str) -> String {
+    pub fn merge_lines(top: &str, bot: &str) -> String {
         let mut ret = String::new();
 
         for (topc, botc) in top.chars().zip(bot.chars()) {
@@ -1144,22 +1144,16 @@ impl TextDrawer {
                 ret.push('│');
             } else if topc == ' ' {
                 ret.push(botc);
-            } else if "┬╥".contains(topc) && " ║│".contains(botc) && icod == "top" {
+            } else if "┬╥".contains(topc) && " ║│".contains(botc) {
                 ret.push(topc);
-            } else if topc == '┬' && botc == ' ' && icod == "bot" {
-                ret.push('│');
-            } else if topc == '╥' && botc == ' ' && icod == "bot" {
-                ret.push('║');
             } else if "┬│".contains(topc) && botc == '═' {
                 ret.push('╪');
             } else if "┬│".contains(topc) && botc == '─' {
                 ret.push('┼');
-            } else if "└┘║│░".contains(topc) && botc == ' ' && icod == "top" {
+            } else if "└┘║│░".contains(topc) && botc == ' ' {
                 ret.push(topc);
-            } else if "─═".contains(topc) && botc == ' ' && icod == "top" {
+            } else if "─═".contains(topc) && botc == ' ' {
                 ret.push(topc);
-            } else if "─═".contains(topc) && botc == ' ' && icod == "bot" {
-                ret.push(botc);
             } else if "║╥".contains(topc) && botc == '═' {
                 ret.push('╬');
             } else if "║╥".contains(topc) && botc == '─' {
@@ -1168,15 +1162,15 @@ impl TextDrawer {
                 ret.push('║');
             } else if "│┼╪".contains(topc) && botc == ' ' {
                 ret.push('│');
-            } else if topc == '└' && botc == '┌' && icod == "top" {
+            } else if topc == '└' && botc == '┌' {
                 ret.push('├');
-            } else if topc == '┘' && botc == '┐' && icod == "top" {
+            } else if topc == '┘' && botc == '┐' {
                 ret.push('┤');
-            } else if "┐┌".contains(botc) && icod == "top" {
+            } else if "┐┌".contains(botc) {
                 ret.push('┬');
-            } else if "┘└".contains(topc) && botc == '─' && icod == "top" {
+            } else if "┘└".contains(topc) && botc == '─' {
                 ret.push('┴');
-            } else if botc == ' ' && icod == "top" {
+            } else if botc == ' ' {
                 ret.push(topc);
             } else {
                 ret.push(botc);
