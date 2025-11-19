@@ -46,7 +46,7 @@ pub fn draw_circuit(
 ) -> PyResult<String> {
     let vis_mat = VisualizationMatrix::from_circuit(circuit, cregbundle)?;
 
-    let text_drawer = TextDrawer::from_visualization_matrix(&vis_mat);
+    let text_drawer = TextDrawer::from_visualization_matrix(&vis_mat, cregbundle);
 
     let fold = match fold {
         Some(f) => f,
@@ -511,6 +511,8 @@ impl<'a> VisualizationMatrix<'a> {
             }
         }
 
+        println!("{:?}", clbit_map);
+
         Ok(VisualizationMatrix { layers, circuit, clbit_map })
     }
 
@@ -690,13 +692,13 @@ impl Debug for TextDrawer {
 }
 
 impl TextDrawer {
-    fn from_visualization_matrix(vis_mat: &VisualizationMatrix) -> Self {
+    fn from_visualization_matrix(vis_mat: &VisualizationMatrix, cregbundle: bool) -> Self {
         let mut text_drawer = TextDrawer {
             wires: vec![Vec::new(); vis_mat.num_wires()],
         };
 
         for (i, layer) in vis_mat.layers.iter().enumerate() {
-            let layer_wires = Self::draw_layer(layer, vis_mat, i);
+            let layer_wires = Self::draw_layer(layer, vis_mat, cregbundle,i);
             for (j, wire) in layer_wires.iter().enumerate() {
                 text_drawer.wires[j].push(wire.clone());
             }
@@ -807,11 +809,12 @@ impl TextDrawer {
     fn draw_layer(
         layer: &VisualizationLayer,
         vis_mat: &VisualizationMatrix,
+        cregbundle: bool,
         layer_ind: usize,
     ) -> Vec<TextWireElement> {
         let mut wires: Vec<TextWireElement> = vec![];
         for (i, element) in layer.0.iter().enumerate() {
-            let wire = Self::draw_element(&element, vis_mat, i);
+            let wire = Self::draw_element(&element, vis_mat, cregbundle,i);
             wires.push(wire);
         }
 
@@ -840,6 +843,7 @@ impl TextDrawer {
     pub fn draw_element(
         vis_ele: &VisualizationElement,
         vis_mat: &VisualizationMatrix,
+        cregbundle: bool,
         ind: usize,
     ) -> TextWireElement {
         let circuit = vis_mat.circuit;
@@ -1029,36 +1033,57 @@ impl TextDrawer {
                     false
                 };
 
-                println!("CLBIT MAP IS {:?}",vis_mat.clbit_map);
-                if is_double_line {
-                    let clbit = circuit.get_cargs(inst.clbits).first().expect("");
-                    if vis_mat.clbit_map[clbit.index()] == ind {
-                        println!("BOOOM");
-                    }
+                if is_double_line{
+                    let clbit = circuit.get_cargs(inst.clbits);
+                    println!("{},{}", ind, vis_mat.clbit_map[clbit.first().unwrap().index()]);
                 }
-
-                if is_double_line {
+                let clbit = circuit.get_cargs(inst.clbits);
+                if ind == vis_mat.clbit_map[clbit.first().unwrap().index()] {
                     top = CL_CONNECTING_WIRE.to_string();
-                    bot = CL_CONNECTING_WIRE.to_string();
-                    mid = {
-                        if ind < circuit.num_qubits() {
-                            CL_Q_CROSSED_WIRE
+                    mid = C_WIRE_CON_TOP.to_string();
+
+                    // TO DO, if someone adds > 99 clbits
+                    // the visualisation will have an extra whitespace shift which
+                    // needs to be fixed
+
+                    bot = if cregbundle {
+                        let clbits = circuit.cargs_interner().get(inst.clbits);
+                        let classical_bit = clbits[0];
+                        let shareable_clbit = circuit.clbits().get(classical_bit).unwrap();
+                        let bit_register_info = circuit.clbit_indices().get(shareable_clbit).unwrap();
+                        let index_in_creg = if let Some((_, index)) = bit_register_info.registers().first() {
+                            *index
                         } else {
-                            CL_CL_CROSSED_WIRE
-                        }
-                    }
-                    .to_string();
+                            classical_bit.index() - circuit.num_qubits()
+                        };
+                        index_in_creg.to_string()
+                    } else {
+                        " ".to_string()
+                    };
                 } else {
-                    top = CONNECTING_WIRE.to_string();
-                    bot = CONNECTING_WIRE.to_string();
-                    mid = {
-                        if ind < circuit.num_qubits() {
-                            Q_Q_CROSSED_WIRE
-                        } else {
-                            Q_CL_CROSSED_WIRE
+                    if is_double_line {
+                        top = CL_CONNECTING_WIRE.to_string();
+                        bot = CL_CONNECTING_WIRE.to_string();
+                        mid = {
+                            if ind < circuit.num_qubits() {
+                                CL_Q_CROSSED_WIRE
+                            } else {
+                                CL_CL_CROSSED_WIRE
+                            }
                         }
+                        .to_string();
+                    } else {
+                        top = CONNECTING_WIRE.to_string();
+                        bot = CONNECTING_WIRE.to_string();
+                        mid = {
+                            if ind < circuit.num_qubits() {
+                                Q_Q_CROSSED_WIRE
+                            } else {
+                                Q_CL_CROSSED_WIRE
+                            }
+                        }
+                        .to_string();
                     }
-                    .to_string();
                 }
             }
             VisualizationElement::Empty => {
